@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instant Citation Generator</title>
+    <style>
+        :root {
+            --bg: #121214;
+            --card: #1a1a1e;
+            --blue: #3b82f6;
+            --text: #f3f4f6;
+            --muted: #9ca3af;
+            --border: #2d2d34;
+        }
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 2rem 1rem;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 650px;
+            width: 100%;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+            color: var(--muted);
+            text-transform: uppercase;
+        }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        input:focus {
+            outline: none;
+            border-color: var(--blue);
+        }
+        .status {
+            font-size: 0.85rem;
+            margin-top: 0.4rem;
+            color: var(--blue);
+            display: none;
+        }
+        .author-warning {
+            font-size: 0.8rem;
+            color: #eab308;
+            margin-top: 0.4rem;
+            display: none;
+            font-weight: 500;
+        }
+        .btn {
+            background: var(--blue);
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .result-box {
+            background: var(--bg);
+            border-left: 4px solid var(--blue);
+            padding: 1rem;
+            font-family: Georgia, serif;
+            font-size: 1.05rem;
+            margin: 1rem 0;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Vibe Citation Generator</h1>
+        <div class="card">
+            <div class="form-group">
+                <label>Website URL</label>
+                <input type="url" id="url" placeholder="Paste link here" onchange="getSiteData()">
+                <div id="status" class="status">Parsing link metadata...</div>
+            </div>
+            <div class="form-group">
+                <label>Author / Organization</label>
+                <input type="text" id="author" placeholder="Author name">
+                <div id="authorWarning" class="author-warning">⚠️ Can not find author. Only use this auto-populated title if author is not found, or find it yourself.</div>
+            </div>
+            <div class="form-group">
+                <label>Page Title</label>
+                <input type="text" id="title" placeholder="Page title">
+            </div>
+            <div class="form-group">
+                <label>Website Name</label>
+                <input type="text" id="container" placeholder="Website platform name">
+            </div>
+            <div class="form-group">
+                <label>Date</label>
+                <input type="text" id="date" placeholder="August 12, 2026">
+            </div>
+            <button class="btn" onclick="makeCitation()">Generate Citation</button>
+        </div>
+        <div class="card" id="resultCard" style="display:none;">
+            <label>Output Citation</label>
+            <div class="result-box" id="output"></div>
+            <button class="btn" onclick="copyText()">Copy Citation</button>
+        </div>
+    </div>
+    <script>
+        window.onload = function() {
+            var opts = { year: "numeric", month: "long", day: "numeric" };
+            document.getElementById("date").placeholder = new Date().toLocaleDateString("en-US", opts);
+        };
+
+        async function getSiteData() {
+            var link = document.getElementById("url").value.trim();
+            if (!link) return;
+            
+            var info = document.getElementById("status");
+            var authorWarning = document.getElementById("authorWarning");
+            
+            info.style.display = "block";
+            info.innerText = "Parsing link metadata...";
+            info.style.color = "#3b82f6";
+            authorWarning.style.display = "none";
+
+            let defaultName = "Website";
+            let fallbackTitle = "Untitled Page";
+            
+            try {
+                var urlObj = new URL(link);
+                var rawHost = urlObj.hostname.replace("www.", "");
+                var parts = rawHost.split(".");
+                if(parts.length > 0) {
+                    defaultName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+                }
+
+                let pathSegments = urlObj.pathname.split("/").filter(Boolean);
+                if (pathSegments.length > 0) {
+                    let lastSegment = pathSegments[pathSegments.length - 1];
+                    let cleanSegment = lastSegment.replace(/[-_]/g, " ").replace(/\.[^/.]+$/, "");
+                    fallbackTitle = cleanSegment.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+                }
+            } catch(e) {
+                info.innerText = "Invalid URL structure.";
+                info.style.color = "#ef4444";
+                return;
+            }
+
+            try {
+                var proxy = "https://api.allorigins.win/get?url=" + encodeURIComponent(link);
+                var res = await fetch(proxy);
+                if (!res.ok) throw new Error();
+                var rawData = await res.json();
+                
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(rawData.contents, "text/html");
+                
+                var aut = "";
+                var autSels = ["meta[name='author']", "meta[name='twitter:creator']"];
+                for (var i = 0; i < autSels.length; i++) {
+                    var el = doc.querySelector(autSels[i]);
+                    if (el && el.getAttribute("content")) {
+                        aut = el.getAttribute("content").trim();
+                        break;
+                    }
+                }
+                
+                if (aut) {
+                    document.getElementById("author").value = aut;
+                    authorWarning.style.display = "none";
+                } else {
+                    document.getElementById("author").value = defaultName;
+                    authorWarning.style.display = "block";
+                }
+
+                var tit = "";
+                var ogTit = doc.querySelector("meta[property='og:title']");
+                if (ogTit && ogTit.getAttribute("content")) {
+                    tit = ogTit.getAttribute("content").trim();
+                } else if (doc.title) {
+                    tit = doc.title.trim();
+                }
+                
+                if (tit) {
+                    var cleanTit = tit;
+                    if (tit.indexOf("|") !== -1) {
+                        cleanTit = tit.split("|")[0];
+                    } else if (tit.indexOf("-") !== -1) {
+                        cleanTit = tit.split("-")[0];
+                    }
+                    document.getElementById("title").value = cleanTit.trim();
+                } else {
+                    document.getElementById("title").value = fallbackTitle;
+                }
+
+                var site = "";
+                var ogSite = doc.querySelector("meta[property='og:site_name']");
+                if (ogSite && ogSite.getAttribute("content")) {
+                    site = ogSite.getAttribute("content").trim();
+                }
+                document.getElementById("container").value = site ? site : defaultName;
+
+                info.innerText = "Metadata successfully pulled!";
+                info.style.color = "#10b981";
+            } catch (err) {
+                document.getElementById("author").value = defaultName;
+                document.getElementById("title").value = fallbackTitle;
+                document.getElementById("container").value = defaultName;
+                
+                authorWarning.style.display = "block";
+                info.innerText = "Proxy restriction active. Smart fallback generated.";
+                info.style.color = "#eab308";
+            }
+        }
+
+        function makeCitation() {
+            var aut = document.getElementById("author").value.trim() || document.getElementById("author").placeholder;
+            var tit = document.getElementById("title").value.trim() || document.getElementById("title").placeholder;
+            var site = document.getElementById("container").value.trim() || document.getElementById("container").placeholder;
+            var dte = document.getElementById("date").value.trim();
+            var link = document.getElementById("url").value.trim();
+            
+            if (!dte) {
+                var opts = { year: "numeric", month: "long", day: "numeric" };
+                dte = new Date().toLocaleDateString("en-US", opts);
+            }
+
+            if (aut === "Author name") aut = "";
+            if (tit === "Page title") tit = "Untitled Page";
+            if (site === "Website platform name") site = "";
+
+            var outHtml = "";
+            if (aut) outHtml += aut + ". ";
+            if (tit) outHtml += "“" + tit + ".” ";
+            if (site) outHtml += "" + site + ". ";
+            if (dte) outHtml += dte + ". ";
+            if (link) outHtml += link;
+
+            document.getElementById("output").innerHTML = outHtml;
+            document.getElementById("resultCard").style.display = "block";
+        }
+
+        function copyText() {
+            var node = document.getElementById("output");
+            var range = document.createRange();
+            range.selectNode(node);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            document.execCommand("copy");
+            window.getSelection().removeAllRanges();
+            alert("Citation copied!");
+        }
+    </script>
+</body>
+</html>
